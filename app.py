@@ -7,6 +7,9 @@ from retry_requests import retry
 # import lets_plot as lp
 import numpy as np
 from shiny import App, Inputs, Outputs, Session, reactive, render, req, ui
+from shinywidgets import render_widget, output_widget
+
+from ipyleaflet import Map,Marker
 
 # Requesting histrical weather API
 def historical_weather():
@@ -59,7 +62,7 @@ cities = pd.read_csv("data/cities.csv")
 daily_dataframe = historical_weather()
 temp = daily_dataframe[['temperature_2m_min']].round().astype(int)
 # Convert city_state column to list
-city_list = cities['city_state'].values.tolist()
+city_list = cities['city_state'].tolist()
 
 # # # calculate consistent limits for differential axis labels
 # # diff_abs_max = np.max(np.abs([nfl["differential"].min(), nfl["differential"].max()]))
@@ -69,20 +72,27 @@ city_list = cities['city_state'].values.tolist()
 # setup ui
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.input_select("city", "City", city_list, selected="New York,New York"),
+        ui.input_selectize("city", "City", city_list, selected="New York,New York"),
+        ui.output_text("selected_lat_lng"),
         ui.input_date_range("dates", "Dates", start="2020-01-01"),
-        ui.input_numeric("forcast_year", "Years to Forecast", 1, min=1, max=5),
-        ui.input_radio_buttons(  "forecast_trend",  "Forecast Trend",  {"1": "Flat", "2": "Linear"}, selected="1"),  
-        ui.input_radio_buttons(  "units",  "Units",  {"1": "Fahrenheit", "2": "Celsius"}, selected="1"),  
-        ui.input_slider("temp","Plot Temperature",min = -15, max = 50, step = 1, value = 5),
+        ui.input_numeric("forecast_year", "Years to Forecast", 1, min=1, max=5),
+        ui.input_radio_buttons( "forecast_trend",  "Forecast Trend",  {"1": "Flat", "2": "Linear"}, selected="1"),  
+        ui.input_radio_buttons( "units",  "Units",  {"1": "Fahrenheit", "2": "Celsius"}, selected="1"),  
+        ui.input_slider("plot_temp","Plot Temperature",min = -15, max = 50, step = 1, value = 5),
         ui.input_checkbox_group("plot_options","Plot Options",choices=["Weekly Rolling Average","Monthly Rolling Average"],inline=False),
-        ui.input_slider("temp","Table Temperature",min = -25, max = 60, step = 1, value =[0,15]),
+        ui.input_slider("table_temp","Table Temperature",min = -25, max = 60, step = 1, value =[0,15]),
+        ui.hr(),
+        output_widget("map")
     ),
-    # ui.card(
-    #     ui.output_ui("plot"),
-    # ),
-    ui.card(
-        ui.output_data_frame("temp_table"),
+    ui.page_navbar(
+        ui.nav_panel("Historical",
+                     ui.output_ui("historical_plot"),
+                     ui.hr(),
+                     ui.output_data_frame("historical_df")),
+        ui.nav_panel("Forecast",
+                     ui.output_ui("forecast_plot"),
+                     ui.hr(),
+                     ui.output_data_frame("forecast_df")),
     ),
     title = "Daily Heat Pump Efficiency Counter",
 )
@@ -90,38 +100,32 @@ app_ui = ui.page_sidebar(
 
 # setup server
 def server(input: Inputs, output: Outputs, session: Session):
-    @reactive.Calc
-    def filtered_df() -> pd.DataFrame:
-
-        df = daily_dataframe
-        return df
-
-    @reactive.Calc
-    def season_table() -> pd.DataFrame:
-
-        df = filtered_df()
-
-        return df
+    def current_lat_lng():
+        selected_city = input.city()
+        # Get the row of the selected city
+        selected_lat_lng= cities[cities["city_state"] == selected_city].iloc[0]
+        lat = selected_lat_lng["lat"]
+        lng = selected_lat_lng["lng"]
+        return lat,lng
     
-    @render.text
-    def value():
-        return f"{input.select()}"
+    @output
+    @render.text("selected_lat_lng")
+    def selected_lat_lng():
+        lat,lng = current_lat_lng()
+        return f"{lat:.4f}°N, {lng:.4f}°E"
+    
+    @render_widget("map")
+    def map():
+        lat,lng = current_lat_lng()
+        map = Map(center = (lat,lng), zoom = 10)
+        marker = Marker(location=(lat, lng))
+        map.add_layer(marker)
 
-    @render.ui
-    def plot():
-        p = (
-            lp.ggplot(filtered_df(), lp.aes(x="week", y="differential", color="team"))
-            + lp.geom_path(tooltips=lp.layer_tooltips().line("Team: @team").line("Record: @wins - @losses"))
-            + lp.ggsize(width=1000, height=700)
-            + lp.ylim(diff_min, diff_max)
-            + lp.labs(x="Week", y="Win-Loss Differential")
-        )
-        phtml = lp._kbridge._generate_static_html_page(p.as_dict(), iframe=True)
-        return ui.HTML(phtml)
-
-    @render.data_frame
-    def temp_table():
-        return render.DataGrid(season_table())
+        return map
+    
+    @render.data_frame("historical_df") 
+    def historical_df():
+        return render.DataGrid(daily_dataframe)
 
 # run app
 app = App(app_ui, server)
