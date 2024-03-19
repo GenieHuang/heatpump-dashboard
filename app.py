@@ -12,7 +12,7 @@ from shinywidgets import render_widget, output_widget
 from ipyleaflet import Map,Marker
 
 # Requesting histrical weather API
-def historical_weather():
+def historical_weather(lat, lng, start_date, end_date, units):
     # Setup the Open-Meteo API client with cache and retry on error
     cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
     retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
@@ -22,12 +22,12 @@ def historical_weather():
     # The order of variables in hourly or daily is important to assign them correctly below
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
-        "latitude": 52.52,               # input
-        "longitude": 13.41,              # input
-        "start_date": "2024-02-14",      # input
-        "end_date": "2024-02-28",        # input
+        "latitude": lat,               # input
+        "longitude": lng,              # input
+        "start_date": start_date,      # input
+        "end_date": end_date,        # input
         "daily": "temperature_2m_min",   # fixed
-        "temperature_unit": "fahrenheit" # input
+        "temperature_unit": units # input
     }
 
     responses = openmeteo.weather_api(url, params=params)
@@ -52,23 +52,16 @@ def historical_weather():
     daily_data["temperature_2m_min"] = daily_temperature_2m_min
 
     daily_dataframe = pd.DataFrame(data = daily_data)
-    return daily_dataframe
+    return daily_dataframe, response.Latitude(),response.Longitude()
 
 # # lets-plot setup
 # lp.LetsPlot.setup_html()
 
 # create full and tidy data
 cities = pd.read_csv("data/cities.csv")
-daily_dataframe = historical_weather()
-temp_F = daily_dataframe[['temperature_2m_min']].astype(float)
-temp_C = (temp_F - 32)/1.8
+
 # Convert city_state column to list
 city_list = cities['city_state'].tolist()
-
-# # # calculate consistent limits for differential axis labels
-# # diff_abs_max = np.max(np.abs([nfl["differential"].min(), nfl["differential"].max()]))
-# # diff_min = -diff_abs_max
-# # diff_max = diff_abs_max
 
 # setup ui
 app_ui = ui.page_sidebar(
@@ -78,7 +71,7 @@ app_ui = ui.page_sidebar(
         ui.input_date_range("dates", "Dates", start="2022-01-01", end="2024-01-01",max="2024-01-01",min="2020-01-01"),
         ui.input_numeric("forecast_year", "Years to Forecast", 1, min=1, max=5),
         ui.input_radio_buttons( "forecast_trend",  "Forecast Trend",  {"1": "Flat", "2": "Linear"}, selected="1"),  
-        ui.input_radio_buttons( "units",  "Units",  {"1": "Fahrenheit", "2": "Celsius"}, selected="1"),  
+        ui.input_radio_buttons( "units",  "Units",  {"fahrenheit": "Fahrenheit", "celsius": "Celsius"}, selected="fahrenheit"),  
         ui.output_ui("plot_temp_slider"),
         ui.input_checkbox_group("plot_options","Plot Options",choices=["Weekly Rolling Average","Monthly Rolling Average"],inline=False),
         ui.output_ui("table_temp_slider"),
@@ -104,9 +97,22 @@ app_ui = ui.page_sidebar(
 
 # setup server
 def server(input: Inputs, output: Outputs, session: Session):
+    def get_data():
+
+        # Params
+        lat, lng = current_lat_lng()
+        start_date = input.dates()[0]
+        end_date = input.dates()[1]
+        units = input.units()
+
+        # Getting historical weather data
+        daily_dataframe, lat, lng = historical_weather(lat, lng,start_date, end_date, units)
+
+        return daily_dataframe, lat, lng
+
     def current_lat_lng():
         selected_city = input.city()
-        # Get the row of the selected city
+        # Get the lat and lng of the selected city_state
         selected_lat_lng= cities[cities["city_state"] == selected_city].iloc[0]
         lat = selected_lat_lng["lat"]
         lng = selected_lat_lng["lng"]
@@ -115,12 +121,12 @@ def server(input: Inputs, output: Outputs, session: Session):
     @output
     @render.text("selected_lat_lng")
     def selected_lat_lng():
-        lat,lng = current_lat_lng()
+        _, lat, lng = get_data()
         return f"{lat:.4f}°N, {lng:.4f}°E"
     
     @render_widget("map")
     def map():
-        lat,lng = current_lat_lng()
+        _, lat, lng = get_data()
         map = Map(center = (lat,lng), zoom = 12)
         marker = Marker(location=(lat, lng))
         map.add_layer(marker)
@@ -136,11 +142,14 @@ def server(input: Inputs, output: Outputs, session: Session):
         selected_temp = input.table_temp()
         temp_list = list(range(selected_temp[0], selected_temp[1] + 1))
         historical_rows = []
-        if units == "1":  # Fahrenheit
+        daily_dataframe,_,_ = get_data()
+        temp_table = daily_dataframe[['temperature_2m_min']].astype(float)
+
+        if units == "fahrenheit":
 
             for temp in temp_list:
-                days_below = temp_F[temp_F["temperature_2m_min"] < temp].shape[0]
-                proportion_below = round(days_below / temp_F.shape[0],3)
+                days_below = temp_table[temp_table["temperature_2m_min"] < temp].shape[0]
+                proportion_below = round(days_below / temp_table.shape[0],3)
                 historical_rows.append({
                     "Temp": temp,
                     "Days Below": days_below,
@@ -150,8 +159,8 @@ def server(input: Inputs, output: Outputs, session: Session):
         else:  # Celsius
 
             for temp in temp_list:
-                days_below = temp_C[temp_C["temperature_2m_min"] < temp].shape[0]
-                proportion_below = round(days_below / temp_C.shape[0],3)
+                days_below = temp_table[temp_table["temperature_2m_min"] < temp].shape[0]
+                proportion_below = round(days_below / temp_table.shape[0],3)
                 historical_rows.append({
                     "Temp": temp,
                     "Days Below": days_below,
@@ -165,7 +174,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render.ui("plot_temp_slider")
     def plot_temp_slider():
         units = input.units()
-        if units == "1":  # Fahrenheit
+        if units == "fahrenheit":
             return ui.input_slider("plot_temp", "Plot Temperature", min=-15, max=50, step=1, value=5)
         else:  # Celsius
             return ui.input_slider("plot_temp", "Plot Temperature", min=-25, max=10, step=1, value=-15)
@@ -174,7 +183,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render.ui("table_temp_slider")
     def table_temp_slider():
         units = input.units()
-        if units == "1":  # Fahrenheit
+        if units == "fahrenheit":
             return ui.input_slider("table_temp", "Table Temperature", min=-25, max=60, step=1, value=[0,15])
         else:  # Celsius
             return ui.input_slider("table_temp", "Table Temperature", min=-30, max=15, step=1, value=[-20,-10])
