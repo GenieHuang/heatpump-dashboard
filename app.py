@@ -60,7 +60,8 @@ def historical_weather():
 # create full and tidy data
 cities = pd.read_csv("data/cities.csv")
 daily_dataframe = historical_weather()
-temp = daily_dataframe[['temperature_2m_min']].round().astype(int)
+temp_F = daily_dataframe[['temperature_2m_min']].astype(float)
+temp_C = (temp_F - 32)/1.8
 # Convert city_state column to list
 city_list = cities['city_state'].tolist()
 
@@ -72,17 +73,19 @@ city_list = cities['city_state'].tolist()
 # setup ui
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.input_selectize("city", "City", city_list, selected="New York,New York"),
+        ui.input_selectize("city", "City", city_list, selected="Urbana,Illinois"),
         ui.output_text("selected_lat_lng"),
-        ui.input_date_range("dates", "Dates", start="2020-01-01"),
+        ui.input_date_range("dates", "Dates", start="2022-01-01", end="2024-01-01",max="2024-01-01",min="2020-01-01"),
         ui.input_numeric("forecast_year", "Years to Forecast", 1, min=1, max=5),
         ui.input_radio_buttons( "forecast_trend",  "Forecast Trend",  {"1": "Flat", "2": "Linear"}, selected="1"),  
         ui.input_radio_buttons( "units",  "Units",  {"1": "Fahrenheit", "2": "Celsius"}, selected="1"),  
-        ui.input_slider("plot_temp","Plot Temperature",min = -15, max = 50, step = 1, value = 5),
+        ui.output_ui("plot_temp_slider"),
         ui.input_checkbox_group("plot_options","Plot Options",choices=["Weekly Rolling Average","Monthly Rolling Average"],inline=False),
-        ui.input_slider("table_temp","Table Temperature",min = -25, max = 60, step = 1, value =[0,15]),
+        ui.output_ui("table_temp_slider"),
         ui.hr(),
-        output_widget("map")
+        output_widget("map",height="300px"),
+        width=300,
+        open='always'
     ),
     ui.page_navbar(
         ui.nav_panel("Historical",
@@ -93,6 +96,7 @@ app_ui = ui.page_sidebar(
                      ui.output_ui("forecast_plot"),
                      ui.hr(),
                      ui.output_data_frame("forecast_df")),
+        ui.nav_panel("About"),
     ),
     title = "Daily Heat Pump Efficiency Counter",
 )
@@ -117,15 +121,65 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render_widget("map")
     def map():
         lat,lng = current_lat_lng()
-        map = Map(center = (lat,lng), zoom = 10)
+        map = Map(center = (lat,lng), zoom = 12)
         marker = Marker(location=(lat, lng))
         map.add_layer(marker)
-
         return map
     
     @render.data_frame("historical_df") 
     def historical_df():
-        return render.DataGrid(daily_dataframe)
+        return render.DataGrid(calculate_table(),summary=False,height='3000px',width=1600)
+    
+    @reactive.Calc
+    def calculate_table():
+        units = input.units()
+        selected_temp = input.table_temp()
+        temp_list = list(range(selected_temp[0], selected_temp[1] + 1))
+        historical_rows = []
+        if units == "1":  # Fahrenheit
+
+            for temp in temp_list:
+                days_below = temp_F[temp_F["temperature_2m_min"] < temp].shape[0]
+                proportion_below = round(days_below / temp_F.shape[0],3)
+                historical_rows.append({
+                    "Temp": temp,
+                    "Days Below": days_below,
+                    "Proportion Below": proportion_below
+                })
+            
+        else:  # Celsius
+
+            for temp in temp_list:
+                days_below = temp_C[temp_C["temperature_2m_min"] < temp].shape[0]
+                proportion_below = round(days_below / temp_C.shape[0],3)
+                historical_rows.append({
+                    "Temp": temp,
+                    "Days Below": days_below,
+                    "Proportion Below": proportion_below
+                })
+
+        historical_df = pd.DataFrame(historical_rows)
+        return historical_df
+    
+    @output
+    @render.ui("plot_temp_slider")
+    def plot_temp_slider():
+        units = input.units()
+        if units == "1":  # Fahrenheit
+            return ui.input_slider("plot_temp", "Plot Temperature", min=-15, max=50, step=1, value=5)
+        else:  # Celsius
+            return ui.input_slider("plot_temp", "Plot Temperature", min=-25, max=10, step=1, value=-15)
+    
+    @output
+    @render.ui("table_temp_slider")
+    def table_temp_slider():
+        units = input.units()
+        if units == "1":  # Fahrenheit
+            return ui.input_slider("table_temp", "Table Temperature", min=-25, max=60, step=1, value=[0,15])
+        else:  # Celsius
+            return ui.input_slider("table_temp", "Table Temperature", min=-30, max=15, step=1, value=[-20,-10])
+
+    
 
 # run app
 app = App(app_ui, server)
