@@ -4,12 +4,13 @@ import requests_cache
 import pandas as pd
 from retry_requests import retry
 
-# import lets_plot as lp
+import lets_plot as lp
 import numpy as np
 from shiny import App, Inputs, Outputs, Session, reactive, render, req, ui
 from shinywidgets import render_widget, output_widget
 
 from ipyleaflet import Map,Marker
+from ipywidgets import Layout
 
 # Requesting histrical weather API
 def historical_weather(lat, lng, start_date, end_date, units):
@@ -54,8 +55,8 @@ def historical_weather(lat, lng, start_date, end_date, units):
     daily_dataframe = pd.DataFrame(data = daily_data)
     return daily_dataframe, response.Latitude(),response.Longitude()
 
-# # lets-plot setup
-# lp.LetsPlot.setup_html()
+# lets-plot setup
+lp.LetsPlot.setup_html()
 
 # create full and tidy data
 cities = pd.read_csv("data/cities.csv")
@@ -76,8 +77,8 @@ app_ui = ui.page_sidebar(
         ui.input_checkbox_group("plot_options","Plot Options",choices=["Weekly Rolling Average","Monthly Rolling Average"],inline=False),
         ui.output_ui("table_temp_slider"),
         ui.hr(),
-        output_widget("map",height="300px"),
-        width=300,
+        output_widget("map"),
+        width=350,
         open='always'
     ),
     ui.page_navbar(
@@ -127,7 +128,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render_widget("map")
     def map():
         _, lat, lng = get_data()
-        map = Map(center = (lat,lng), zoom = 12)
+        map = Map(center = (lat,lng), zoom = 12, layout=Layout(height='200px'))
         marker = Marker(location=(lat, lng))
         map.add_layer(marker)
         return map
@@ -138,27 +139,13 @@ def server(input: Inputs, output: Outputs, session: Session):
     
     @reactive.Calc
     def calculate_table():
-        units = input.units()
         selected_temp = input.table_temp()
-        temp_list = list(range(selected_temp[0], selected_temp[1] + 1))
+        temp_list = list(range(selected_temp[1], selected_temp[0] - 1, -1))
         historical_rows = []
         daily_dataframe,_,_ = get_data()
         temp_table = daily_dataframe[['temperature_2m_min']].astype(float)
-
-        if units == "fahrenheit":
-
-            for temp in temp_list:
-                days_below = temp_table[temp_table["temperature_2m_min"] < temp].shape[0]
-                proportion_below = round(days_below / temp_table.shape[0],3)
-                historical_rows.append({
-                    "Temp": temp,
-                    "Days Below": days_below,
-                    "Proportion Below": proportion_below
-                })
-            
-        else:  # Celsius
-
-            for temp in temp_list:
+        
+        for temp in temp_list:
                 days_below = temp_table[temp_table["temperature_2m_min"] < temp].shape[0]
                 proportion_below = round(days_below / temp_table.shape[0],3)
                 historical_rows.append({
@@ -188,7 +175,48 @@ def server(input: Inputs, output: Outputs, session: Session):
         else:  # Celsius
             return ui.input_slider("table_temp", "Table Temperature", min=-30, max=15, step=1, value=[-20,-10])
 
-    
+    @output
+    @render.ui("historical_plot")
+    def historical_plot():
+        daily_dataframe,_,_ = get_data()
+        daily_dataframe["date"] = pd.to_datetime(daily_dataframe["date"])
+
+        daily_dataframe["weekly_rolling"] = daily_dataframe["temperature_2m_min"].rolling(window=7).mean()
+        daily_dataframe["monthly_rolling"] = daily_dataframe["temperature_2m_min"].rolling(window=30).mean()
+
+        selected_temp_line = input.plot_temp()
+
+        date_range = pd.date_range("2020-01-01","2024-01-01", freq="3M")
+        breaks_list = date_range.tolist()
+
+        plot_options = input.plot_options()
+
+        p = (
+            lp.ggplot(daily_dataframe, lp.aes(x="date"))
+            + lp.geom_point(lp.aes(y="temperature_2m_min"), color="grey", alpha=0.5) 
+            + lp.geom_point(lp.aes(y="temperature_2m_min"), 
+                    color="black",
+                    data=daily_dataframe[daily_dataframe['temperature_2m_min'] > selected_temp_line])
+
+            + lp.geom_hline(yintercept=selected_temp_line, color="black", size=0.5, show_legend=False)
+            + lp.ggsize(width = 1400, height = 500)
+            + lp.labs(x="",y="Daily Minimum Temperature °F")
+            + lp.scale_x_datetime(breaks=breaks_list,format="%Y-%m")
+            + lp.theme(panel_border=lp.element_rect(color="black",size=1),
+                       axis_title=lp.element_text(face="bold"),
+                       axis_text_x = lp.element_text(angle=0))
+        )
+
+        if "Weekly Rolling Average" in plot_options:
+            p += lp.geom_line(lp.aes(y="weekly_rolling"), color = "orange", size = 1)
+
+        if "Monthly Rolling Average" in plot_options:
+            p += lp.geom_line(lp.aes(y="monthly_rolling"), color = "blue", size = 1)
+            
+        phtml = lp._kbridge._generate_static_html_page(p.as_dict(), iframe=True)
+
+        # Return the HTML to be rendered in the Shiny app
+        return ui.HTML(phtml)
 
 # run app
 app = App(app_ui, server)
