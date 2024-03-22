@@ -92,7 +92,9 @@ city_list = cities["city_state"].tolist()
 
 # setup ui
 app_ui = ui.page_sidebar(
+
     ui.sidebar(
+        ui.tags.style(".shiny-text-output { text-align: center; }"),
         ui.input_selectize("city", "City", city_list, selected="Urbana,Illinois"),
         ui.output_text("selected_lat_lng"),
         ui.input_date_range("dates", "Dates", start="2022-01-01", end="2024-01-01",max="2024-01-01",min="2020-01-01"),
