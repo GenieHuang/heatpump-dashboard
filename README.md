@@ -1,4 +1,6 @@
-# About This Dashboard
+# Daily Heat Pump Efficiency Counter
+
+## About This Dashboard
 
 This dashboard is designed to support the decision-making process of the installation of heat pumps.
 It leverages historical weather information and forecast information to provide a comprehensive analysis of weather patterns in your selected location.
