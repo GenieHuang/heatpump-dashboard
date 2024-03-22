@@ -1,4 +1,3 @@
-"""
 # About This Dashboard
 
 This dashboard is designed to support the decision-making process of the installation of heat pumps.
@@ -22,4 +21,3 @@ assisting in assessing the efficiency of installing a heat pump.
 ## References
 - **Location Data:** SimpleMaps. (2024). U.S. City and State Data (Version 1.78) [Data set]. Retrieved from https://simplemaps.com/static/data/us-cities/1.78/basic/simplemaps_uscities_basicv1.78.zip
 - **Weather Data:** Open-Meteo. (n.d.). Historical Weather API. Retrieved from https://open-meteo.com/en/docs/historical-weather-api
-"""
