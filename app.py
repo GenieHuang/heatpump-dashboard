@@ -64,7 +64,7 @@ It leverages historical weather information and forecast information to provide 
 Through interactive and well-formatted plots and tables, you are able to gain immediate insights into historical weather conditions and future predictions,
 assisting in assessing the efficiency of installing a heat pump.
 
-## Instructions:
+## Instructions
 
 1. Use the left sidebar to customize your selection, including location, date range, and measurement units.
 2. Temperature Sliders:
@@ -75,10 +75,11 @@ assisting in assessing the efficiency of installing a heat pump.
 3. Explore rolling average temperature plots by selecting your desired plot options.
 4. On the forecast page, choose your trend prediction and specify the forecast year.
 
-## References
+**_Please note that accurate predictions require a historical data span of over one year. Make sure to select an appropriate date range for forecasting analysis._**
 
-1.**Location Data:** SimpleMaps. (2024). U.S. City and State Data (Version 1.78) [Data set]. Retrieved from https://simplemaps.com/static/data/us-cities/1.78/basic/simplemaps_uscities_basicv1.78.zip
-2.**Weather Data:** Open-Meteo. (n.d.). Historical Weather API. Retrieved from https://open-meteo.com/en/docs/historical-weather-api
+## References
+- **Location Data:** SimpleMaps. (2024). U.S. City and State Data (Version 1.78) [Data set]. Retrieved from https://simplemaps.com/static/data/us-cities/1.78/basic/simplemaps_uscities_basicv1.78.zip
+- **Weather Data:** Open-Meteo. (n.d.). Historical Weather API. Retrieved from https://open-meteo.com/en/docs/historical-weather-api
     """
     return context
 
@@ -125,8 +126,6 @@ app_ui = ui.page_sidebar(
 # setup server
 def server(input: Inputs, output: Outputs, session: Session):
     def get_data():
-
-        global start_date, end_date
 
         # Params
         lat, lng = current_lat_lng()
@@ -270,9 +269,7 @@ def server(input: Inputs, output: Outputs, session: Session):
         forecast = m.predict(future)
         future_dataframe = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]]
 
-        fig = m.plot(forecast)
-
-        return future_dataframe, fig
+        return future_dataframe, m
     
     # Calculate the forecast table
     @reactive.Calc
@@ -302,6 +299,9 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render.data_frame("forecast_df") 
     def forecast_df():
 
+        start_date = input.dates()[0]
+        end_date = input.dates()[1]
+        
         # No forecast if there is less than one year of training data
         if (end_date - start_date).days < 365:
             pass
@@ -313,11 +313,17 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render.plot(alt="forecast_plot")
     def forecast_plot():
 
+        start_date = input.dates()[0]
+        end_date = input.dates()[1]
+
         # No forecast if there is less than one year of training data
         if (end_date - start_date).days < 365:
             pass
         else:
-            _, fig = get_forecast_df_fig()
+            future_dataframe, m = get_forecast_df_fig()
+
+            fig = m.plot(future_dataframe)
+
             ax = fig.gca()
 
             selected_temp_line = input.plot_temp()
