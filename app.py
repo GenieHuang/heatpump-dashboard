@@ -54,11 +54,40 @@ def historical_weather(lat, lng, start_date, end_date, units):
     daily_dataframe = pd.DataFrame(data = daily_data)
     return daily_dataframe, response.Latitude(),response.Longitude()
 
-# create full and tidy data
+# About page content
+def about_content():
+    context = """
+# About This Dashboard
+
+This dashboard is designed to support the decision-making process of the installation of heat pumps.
+It leverages historical weather information and forecast information to provide a comprehensive analysis of weather patterns in your selected location.
+Through interactive and well-formatted plots and tables, you are able to gain immediate insights into historical weather conditions and future predictions,
+assisting in assessing the efficiency of installing a heat pump.
+
+## Instructions:
+
+1. Use the left sidebar to customize your selection, including location, date range, and measurement units.
+2. Temperature Sliders:
+    - **Plot Temperature Slider:** Set a temperature value to visually distinguish days below this temperature in the plot:
+      days below are marked in grey and above in black, offering a clear view of cooler days.
+    - **Table Temperature Slider:** Set a temperature range to show a summary for each temperature within this range,
+      including the number of days below each temperature and proportion of the total.
+3. Explore rolling average temperature plots by selecting your desired plot options.
+4. On the forecast page, choose your trend prediction and specify the forecast year.
+
+## References
+
+    **Location Data:** SimpleMaps. (2024). U.S. City and State Data (Version 1.78) [Data set]. Retrieved from https://simplemaps.com/static/data/us-cities/1.78/basic/simplemaps_uscities_basicv1.78.zip
+    **Weather Data:** Open-Meteo. (n.d.). Historical Weather API. Retrieved from https://open-meteo.com/en/docs/historical-weather-api
+    """
+    return context
+
+
+# Create full and tidy data
 cities = pd.read_csv("data/cities.csv")
 
 # Convert city_state column to list
-city_list = cities['city_state'].tolist()
+city_list = cities["city_state"].tolist()
 
 # setup ui
 app_ui = ui.page_sidebar(
@@ -75,7 +104,7 @@ app_ui = ui.page_sidebar(
         ui.hr(),
         output_widget("map"),
         width=350,
-        open='always'
+        open="always"
     ),
     ui.page_navbar(
         ui.nav_panel("Historical",
@@ -86,7 +115,8 @@ app_ui = ui.page_sidebar(
                      ui.output_plot("forecast_plot"),
                      ui.hr(),
                      ui.output_data_frame("forecast_df")),
-        ui.nav_panel("About"),
+        ui.nav_panel("About",
+                     ui.markdown(about_content())),
     ),
     title = "Daily Heat Pump Efficiency Counter",
 )
@@ -95,6 +125,8 @@ app_ui = ui.page_sidebar(
 # setup server
 def server(input: Inputs, output: Outputs, session: Session):
     def get_data():
+
+        global start_date, end_date
 
         # Params
         lat, lng = current_lat_lng()
@@ -126,7 +158,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     @render_widget("map")
     def map():
         _, lat, lng = get_data()
-        map = Map(center = (lat,lng), zoom = 12, layout=Layout(height='200px'))
+        map = Map(center = (lat,lng), zoom = 12, layout=Layout(height="200px"))
         marker = Marker(location=(lat, lng))
         map.add_layer(marker)
         return map
@@ -134,7 +166,7 @@ def server(input: Inputs, output: Outputs, session: Session):
     # Historical table
     @render.data_frame("historical_df") 
     def historical_df():
-        return render.DataGrid(calculate_historical_table(),summary=False,height='3000px',width=1600)
+        return render.DataGrid(calculate_historical_table(),summary=False,height="3000px",width=1600)
     
     # Calculate the historical table
     @reactive.Calc
@@ -194,10 +226,10 @@ def server(input: Inputs, output: Outputs, session: Session):
         
         fig, ax = plt.subplots(figsize=(14, 5))
 
-        ax.scatter(daily_dataframe["date"], daily_dataframe["temperature_2m_min"], color="grey", alpha=0.8, s=10)
+        ax.scatter(daily_dataframe["date"], daily_dataframe["temperature_2m_min"], color="grey", alpha=0.4, s=10)
 
-        ax.scatter(daily_dataframe[daily_dataframe['temperature_2m_min'] > selected_temp_line]["date"], 
-               daily_dataframe[daily_dataframe['temperature_2m_min'] > selected_temp_line]["temperature_2m_min"], 
+        ax.scatter(daily_dataframe[daily_dataframe["temperature_2m_min"] > selected_temp_line]["date"], 
+               daily_dataframe[daily_dataframe["temperature_2m_min"] > selected_temp_line]["temperature_2m_min"], 
                color="black", s=10)
         
         # Horizontal line for the selected temperature
@@ -211,10 +243,9 @@ def server(input: Inputs, output: Outputs, session: Session):
             ax.plot(daily_dataframe["date"], daily_dataframe["monthly_rolling"], color="cornflowerblue", linewidth=2)
 
         # Formatting the axis
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
 
-        ax.set_ylabel('Daily Minimum Temperature °F')
-        ax.legend()
+        ax.set_ylabel("Daily Minimum Temperature °F")
 
         plt.xticks(rotation=0)
         plt.grid(True,alpha = 0.5)
@@ -225,33 +256,25 @@ def server(input: Inputs, output: Outputs, session: Session):
     def get_forecast_df_fig():
         daily_dataframe,_,_ = get_data()
         daily_dataframe.rename(columns={"date":"ds","temperature_2m_min":"y"},inplace = True)
-        daily_dataframe['ds'] = daily_dataframe['ds'].dt.tz_localize(None)
+        daily_dataframe["ds"] = daily_dataframe["ds"].dt.tz_localize(None)
 
         forecast_trend = input.forecast_trend()
         forecast_year = input.forecast_year()
 
-        end_date = pd.to_datetime(input.dates()[1])
-
-        # Forcasting
-        m = Prophet(growth = forecast_trend)
+        # Forecast
+        m = Prophet(growth = forecast_trend,interval_width=0.95)
         m.fit(daily_dataframe)
 
-        future = m.make_future_dataframe(periods=(365*int(forecast_year)))
+        future = m.make_future_dataframe(periods=(365*int(forecast_year)),include_history=False)
 
         forecast = m.predict(future)
-        future_dataframe = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+        future_dataframe = forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]]
 
-
-        forecast['ds'] = pd.to_datetime(forecast['ds'])
-
-        # Split the DataFrame based on the 'end_date'
-        forecast_plot_df = forecast[forecast['ds'] > end_date]
-
-        fig = m.plot(forecast_plot_df)
+        fig = m.plot(forecast)
 
         return future_dataframe, fig
     
-    # Calculate the forecasting table
+    # Calculate the forecast table
     @reactive.Calc
     def calculate_forecast_table():
 
@@ -275,31 +298,42 @@ def server(input: Inputs, output: Outputs, session: Session):
         forecast_df = pd.DataFrame(forecast_rows)
         return forecast_df
     
-    # Forecasting table
+    # Forecast table
     @render.data_frame("forecast_df") 
     def forecast_df():
-        return render.DataGrid(calculate_forecast_table(),summary=False,height='3000px',width=1600)
 
-    # Forecasting plot
+        # No forecast if there is less than one year of training data
+        if (end_date - start_date).days < 365:
+            pass
+        else:
+            return render.DataGrid(calculate_forecast_table(),summary=False,height="3000px",width=1600)
+
+    # Forecast plot
     @output
     @render.plot(alt="forecast_plot")
     def forecast_plot():
 
-        _, fig = get_forecast_df_fig()
-        ax = fig.gca()
+        # No forecast if there is less than one year of training data
+        if (end_date - start_date).days < 365:
+            pass
+        else:
+            _, fig = get_forecast_df_fig()
+            ax = fig.gca()
 
-        selected_temp_line = input.plot_temp()
+            selected_temp_line = input.plot_temp()
 
-        daily_dataframe,_,_ = get_data()
-        daily_dataframe["date"] = pd.to_datetime(daily_dataframe["date"])
+            daily_dataframe,_,_ = get_data()
+            daily_dataframe["date"] = pd.to_datetime(daily_dataframe["date"])
 
-        ax.scatter(daily_dataframe["date"], daily_dataframe["temperature_2m_min"], color="black", s=10)
+            ax.scatter(daily_dataframe["date"], daily_dataframe["temperature_2m_min"], color="black", s=10)
 
-        # Horizontal line for the selected temperature
-        ax.axhline(y=selected_temp_line, color="grey", linewidth=0.5)
+            # Horizontal line for the selected temperature
+            ax.axhline(y=selected_temp_line, color="grey", linewidth=0.5)
 
-        plt.ylabel("Daily Minimum Temperature °F")
-        plt.xlabel("")
-        return fig
+            plt.ylabel("Daily Minimum Temperature °F")
+            plt.xlabel("")
+            
+            return fig
+
 # run app
 app = App(app_ui, server)
